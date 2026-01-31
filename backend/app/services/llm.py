@@ -99,7 +99,7 @@ CHAT_SYSTEM_PROMPT = """
 한 번에 1~2문장으로 짧게 대답해.
 
 [중요]
-대화가 3~4턴 이상 진행되어 충분하다고 판단되거나, 어르신이 그만 끊자고 하면
+대화가 마무리될 때나 어르신이 그만 끊자고 하면
 마무리 인사를 하고 문장 맨 끝에 반드시 "[END]"라고 붙여.
 """.strip()
 
@@ -108,19 +108,24 @@ def make_assistant_reply(conversation: List[Dict[str, str]]) -> tuple[str, bool]
     """
     Returns: (reply_text, end_call_flag)
     """
-    # 대화 턴 수 계산 (시스템 프롬프트 제외)
-    # conversation에는 user, assistant 턴이 섞여 있음
-    # 너무 길어지면 강제 종료 유도 가능
     
-    resp = client.responses.create(
+    # [수정] 대화 길이 강제 제한 로직 추가
+    # conversation 리스트 길이 6 = (User, AI) x 3턴
+    is_time_to_end = len(conversation) >= 6
+    
+    current_prompt = CHAT_SYSTEM_PROMPT
+    if is_time_to_end:
+        current_prompt += "\n\n[SYSTEM: 대화가 충분히 길어졌어. 이제 다정하게 작별 인사를 하고 반드시 문장 끝에 [END]를 붙여서 통화를 종료해.]"
+
+    resp = client.chat.completions.create(
         model=CHAT_MODEL,
-        temperature=0.7,
-        input=[
-            {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+        messages=[
+            {"role": "system", "content": current_prompt},
             *conversation,
         ],
+        temperature=0.7,
     )
-    raw_text = (resp.output_text or "").strip()
+    raw_text = (resp.choices[0].message.content or "").strip()
 
     end_call = False
     if "[END]" in raw_text:
@@ -184,16 +189,17 @@ def evaluate_transcript(transcript: str, context: List[Dict[str, str]] | None = 
         + EVAL_SCHEMA
     )
 
-    resp = client.responses.create(
+    resp = client.chat.completions.create(
         model=EVAL_MODEL,
-        temperature=0,
-        input=[
+        messages=[
             {"role": "system", "content": EVAL_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
+        response_format={ "type": "json_object" },
+        temperature=0,
     )
 
-    raw = (resp.output_text or "").strip()
+    raw = (resp.choices[0].message.content or "").strip()
     try:
         obj = _safe_json_loads(raw)
     except Exception:
@@ -233,20 +239,21 @@ def generate_final_report(conversation: List[Dict[str, str]]) -> Dict[str, Any]:
     user_prompt = (
         "다음은 전체 통화 내역이다.\n"
         + full_text
-        + "\n\n위 내용을 바탕으로 인지 건강 관점의 종합 리포트를 키워드를 중심으로 작성하라.\n"
+        + "\n\n위 내용을 바탕으로 인지 건강 관점의 종합 리포트를 작성하라.\n"
         + REPORT_SCHEMA
     )
 
-    resp = client.responses.create(
+    resp = client.chat.completions.create(
         model=EVAL_MODEL,
-        temperature=0,
-        input=[
+        messages=[
             {"role": "system", "content": REPORT_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
+        response_format={ "type": "json_object" },
+        temperature=0,
     )
     
-    raw = (resp.output_text or "").strip()
+    raw = (resp.choices[0].message.content or "").strip()
     try:
         return _safe_json_loads(raw)
     except:

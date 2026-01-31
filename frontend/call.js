@@ -31,17 +31,11 @@ const aiWave = document.getElementById("ai-wave");
 const micBtn = document.getElementById("btn-mic");
 const micLabel = document.getElementById("mic-label");
 const timerEl = document.getElementById("call-timer");
-const debugLog = document.getElementById("debug-log");
 
 // --- UTILS ---
 function log(msg) {
-  console.log(msg);
-  if (debugLog) {
-      debugLog.style.display = "block";
-      const p = document.createElement("div");
-      p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-      debugLog.prepend(p);
-  }
+  // 화면 출력 로직 삭제, 콘솔에만 표시
+  console.log(`[Call] ${msg}`);
 }
 
 // --- INITIALIZATION ---
@@ -306,9 +300,8 @@ function playAssistantTurn(url, meta) {
   log("재생 시작: " + url);
   globalAudio.src = API_BASE + url;
   
-  // [수정] 재생 실패 시 '터치하여 듣기' UI 제공
   globalAudio.play().catch(e => {
-      log("재생 실패(브라우저 차단): " + e);
+      log("재생 실패: " + e);
       statusText.textContent = "🔊 눌러서 듣기";
       statusText.style.cursor = "pointer";
       statusText.onclick = () => {
