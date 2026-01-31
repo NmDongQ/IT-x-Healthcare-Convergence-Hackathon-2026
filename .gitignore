@@ -6,3 +6,5 @@ __pycache__/
 node_modules/
 backend/app.db
 backend/storage/
+*.wav
+storage/audio/
