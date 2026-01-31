@@ -29,7 +29,7 @@ a {
 
 .app-shell {
   min-height: calc(100vh - 48px);
-  margin: 24px;
+  margin: 0;
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
@@ -202,6 +202,7 @@ a {
   border-collapse: collapse;
   font-size: 14px;
   min-width: 880px;
+  table-layout: fixed;
 }
 
 .member-table thead th {
@@ -215,10 +216,19 @@ a {
   font-weight: 600;
 }
 
+.member-table thead th,
+.member-table tbody td {
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
 .member-table thead th .caret {
   font-size: 11px;
   opacity: 0.85;
   margin-left: 4px;
+  display: inline-block;
+  width: 0.9em;
+  text-align: left;
 }
 
 .member-table tbody td {
@@ -234,6 +244,47 @@ a {
 .member-table tbody tr:last-child td {
   border-bottom: none;
 }
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 16px 16px;
+  border-top: 1px solid #efeafe;
+  background: #faf8ff;
+  flex-wrap: wrap;
+}
+
+.page-btn {
+  border: 1px solid #d7ccfb;
+  background: #fff;
+  color: #3b2f6d;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: #efeafe;
+  border-color: #b9a6f6;
+  color: #2c1f5f;
+}
+
+.page-btn.is-active {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+  font-weight: 700;
+}
+
+.page-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 
 .risk-pill {
   display: inline-flex;

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>뚝뚝 - 가입자 관리</title>
+    <title>뚝뚝 - 고객 관리</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -29,7 +29,7 @@
         </div>
       </header>
       <main class="content">
-        <h1 class="page-title">가입자 관리</h1>
+        <h1 class="page-title">고객 관리</h1>
         <section aria-label="가입자 검색">
           <div class="search-row">
             <label class="search-field" for="memberSearch">
@@ -47,6 +47,14 @@
         <section class="table-card" aria-label="가입자 리스트">
           <div class="table-scroll">
             <table class="member-table">
+              <colgroup>
+                <col style="width: 16%" />
+                <col style="width: 16%" />
+                <col style="width: 12%" />
+                <col style="width: 10%" />
+                <col style="width: 23%" />
+                <col style="width: 23%" />
+              </colgroup>
               <thead>
                 <tr>
                   <th data-key="customer_name">고객명 <span class="caret"></span></th>
@@ -60,22 +68,26 @@
               <tbody id="memberList"></tbody>
             </table>
           </div>
+          <div class="pagination" id="pagination" aria-label="가입자 페이지네이션"></div>
         </section>
       </main>
     </div>
     <script>
-      const API_BASE = "http://localhost:8000";
+      const API_BASE = "http://127.0.0.1:8001";
+      const PAGE_SIZE = 12;
 
       let members = [];
       let sortBy = "member_no";
       let sortOrder = "asc";
       let currentSearch = "";
+      let currentPage = 1;
 
       const listEl = document.getElementById("memberList");
       const searchInput = document.getElementById("memberSearch");
       const searchBtn = document.getElementById("searchBtn");
       const scrollEl = document.querySelector(".table-scroll");
       const topbar = document.querySelector(".topbar");
+      const paginationEl = document.getElementById("pagination");
 
       let lastWindowScroll = 0;
       let lastTableScroll = 0;
@@ -101,7 +113,12 @@
       }
 
       function renderList(list, highlightNo = "") {
-        listEl.innerHTML = list
+        const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+        if (currentPage > totalPages) currentPage = totalPages;
+        const startIndex = (currentPage - 1) * PAGE_SIZE;
+        const pageItems = list.slice(startIndex, startIndex + PAGE_SIZE);
+
+        listEl.innerHTML = pageItems
           .map((member) => {
             const highlightClass =
               highlightNo && member.memberNo === highlightNo
@@ -119,6 +136,49 @@
             `;
           })
           .join("");
+
+        renderPagination(list.length);
+      }
+
+      function renderPagination(totalItems) {
+        const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+        paginationEl.innerHTML = "";
+
+        const fragment = document.createDocumentFragment();
+        fragment.appendChild(
+          buildPageButton("이전", currentPage - 1, currentPage === 1)
+        );
+
+        for (let page = 1; page <= totalPages; page += 1) {
+          const button = buildPageButton(String(page), page, false, true);
+          if (page === currentPage) button.classList.add("is-active");
+          fragment.appendChild(button);
+        }
+
+        fragment.appendChild(
+          buildPageButton("다음", currentPage + 1, currentPage === totalPages)
+        );
+
+        paginationEl.appendChild(fragment);
+      }
+
+      function buildPageButton(label, page, disabled, isNumber = false) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = isNumber ? "page-btn page-number" : "page-btn";
+        button.textContent = label;
+        button.disabled = disabled;
+        button.addEventListener("click", () => {
+          if (disabled) return;
+          goToPage(page);
+        });
+        return button;
+      }
+
+      function goToPage(page) {
+        currentPage = page;
+        renderList(members);
+        scrollEl.scrollTop = 0;
       }
 
       function updateCarets() {
@@ -151,6 +211,7 @@
       function applySearch() {
         const query = searchInput.value.trim();
         currentSearch = query;
+        currentPage = 1;
         fetchMembers().then(() => {
           if (!query) return;
           const found = members.find((m) => m.memberNo === query);
