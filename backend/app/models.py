@@ -45,3 +45,15 @@ class Turn(Base):
     meta_json: Mapped[str | None] = mapped_column(Text, nullable=True) # 필요 시 JSON string
 
     session: Mapped["Session"] = relationship("Session", back_populates="turns")
+
+
+class Member(Base):
+    __tablename__ = "members"
+
+    member_no: Mapped[str] = mapped_column(String(32), primary_key=True)
+    customer_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    guardian_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    risk: Mapped[int] = mapped_column(Integer, nullable=False)  # 0~100
+    customer_phone: Mapped[str] = mapped_column(String(30), nullable=False)
+    guardian_phone: Mapped[str] = mapped_column(String(30), nullable=False)
+    created_at_utc: Mapped[datetime] = mapped_column(DateTime, nullable=False)

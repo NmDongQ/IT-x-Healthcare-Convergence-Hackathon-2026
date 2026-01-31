@@ -7,10 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile, Depends
 from fastapi.responses import FileResponse, PlainTextResponse
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine, select
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine, select, or_
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
+
+from .models import Member
+from .db import get_db
 
 from .services.llm import evaluate_transcript, make_assistant_reply
 from .services.stt import transcribe_audio

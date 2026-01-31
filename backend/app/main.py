@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from dotenv import load_dotenv
@@ -25,3 +28,9 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+app.mount(
+    "/",
+    StaticFiles(directory="../frontend", html=True),
+    name="frontend",
+)
