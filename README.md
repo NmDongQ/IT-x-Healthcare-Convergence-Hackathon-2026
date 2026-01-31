@@ -1,13 +1,6 @@
 # NADURI
 2026 헬스케어 x IT 해커톤 레포 - 갑천나들이 팀
 
-
-# 
-
-## 
-
-[one_pager.pdf](attachment:baee19fa-14b6-4a17-acd3-b2c37cbf256a:one_pager.pdf)
-
 # AI가 매일 안부를 묻다, 일상 대화형 치매 스크리닝
 
 - 보험사와 지자체를 위한 선제적 인지 건강 관리 솔루션 -
