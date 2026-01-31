@@ -11,13 +11,10 @@
       <header class="topbar">
         <div class="topbar-inner">
           <a class="brand" href="index.html">
-            <span class="logo-box" aria-hidden="true"></span>
-            <span>뚝뚝</span>
+            <img class="logo-image" src="logo.jpg" alt="똑똑 로고" />
           </a>
           <nav class="nav" aria-label="주요 메뉴">
             <a class="nav-link is-active" href="index.html">고객 관리</a>
-            <a class="nav-link" href="page-2.html">고객 관리</a>
-            <a class="nav-link" href="page-3.html">고객 관리</a>
           </nav>
           <div class="spacer"></div>
           <button class="login-btn" type="button">
@@ -51,9 +48,8 @@
                 <col style="width: 16%" />
                 <col style="width: 16%" />
                 <col style="width: 12%" />
-                <col style="width: 10%" />
-                <col style="width: 23%" />
-                <col style="width: 23%" />
+                <col style="width: 14%" />
+                <col style="width: 14%" />
               </colgroup>
               <thead>
                 <tr>
@@ -61,8 +57,7 @@
                   <th data-key="guardian_name">보호자명 <span class="caret"></span></th>
                   <th data-key="member_no">회원번호 <span class="caret"></span></th>
                   <th data-key="risk">위험도 <span class="caret"></span></th>
-                  <th data-key="customer_phone">고객 연락처 <span class="caret"></span></th>
-                  <th data-key="guardian_phone">보호자 연락처 <span class="caret"></span></th>
+                  <th>리포트</th>
                 </tr>
               </thead>
               <tbody id="memberList"></tbody>
@@ -135,8 +130,7 @@
                 <td>${member.guardianName}</td>
                 <td>${member.memberNo}</td>
                 <td><span class="risk-pill">${member.risk}%</span></td>
-                <td>${member.customerPhone}</td>
-                <td>${member.guardianPhone}</td>
+                <td><button class="report-btn" type="button">다운로드</button></td>
               </tr>
             `;
           })
