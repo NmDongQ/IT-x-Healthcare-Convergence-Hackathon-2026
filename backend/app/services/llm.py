@@ -109,7 +109,7 @@ def make_assistant_reply(conversation: List[Dict[str, str]]) -> tuple[str, bool]
     Returns: (reply_text, end_call_flag)
     """
     
-    # [수정] 대화 길이 강제 제한 로직 추가
+    # [수정] 대화 길이 강제 제한 로직
     # conversation 리스트 길이 6 = (User, AI) x 3턴
     is_time_to_end = len(conversation) >= 6
     
@@ -117,6 +117,7 @@ def make_assistant_reply(conversation: List[Dict[str, str]]) -> tuple[str, bool]
     if is_time_to_end:
         current_prompt += "\n\n[SYSTEM: 대화가 충분히 길어졌어. 이제 다정하게 작별 인사를 하고 반드시 문장 끝에 [END]를 붙여서 통화를 종료해.]"
 
+    # [수정] 올바른 OpenAI 메서드 사용
     resp = client.chat.completions.create(
         model=CHAT_MODEL,
         messages=[

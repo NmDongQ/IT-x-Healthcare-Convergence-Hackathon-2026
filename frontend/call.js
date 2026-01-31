@@ -301,7 +301,7 @@ function playAssistantTurn(url, meta) {
   globalAudio.src = API_BASE + url;
   
   globalAudio.play().catch(e => {
-      log("재생 실패: " + e);
+      log("재생 실패(브라우저 차단): " + e);
       statusText.textContent = "🔊 눌러서 듣기";
       statusText.style.cursor = "pointer";
       statusText.onclick = () => {
