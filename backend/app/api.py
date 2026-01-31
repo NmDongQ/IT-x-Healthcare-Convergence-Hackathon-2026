@@ -53,7 +53,6 @@ def _load_recent_conversation(s: DBSession, session_id: str, limit: int = 20) ->
         .order_by(TurnModel.turn_index.asc())
     )
     rows = s.execute(q).scalars().all()
-    # 전체 맥락을 위해 limit을 좀 넉넉히 잡거나, 필요하면 슬라이싱
     subset = rows[-limit:] if len(rows) > limit else rows
 
     convo: List[Dict[str, str]] = []
@@ -62,7 +61,7 @@ def _load_recent_conversation(s: DBSession, session_id: str, limit: int = 20) ->
             continue
         role = "user" if r.speaker == "user" else "assistant"
         convo.append({"role": role, "content": r.text})
-    return convo # 전체 대화 반환
+    return convo 
 
 # --- API ENDPOINTS ---
 
@@ -93,9 +92,6 @@ def end_session(session_id: str = Form(...)) -> Dict[str, Any]:
 
 @router.post("/session/{session_id}/finalize")
 def finalize_session_endpoint(session_id: str) -> Dict[str, Any]:
-    """
-    통화 종료 후 종합 리포트 생성 및 DB 영구 저장
-    """
     with db() as s:
         row = _get_session_or_404(s, session_id)
         
@@ -132,7 +128,6 @@ def get_session_report(session_id: str) -> Dict[str, Any]:
             "report": report
         }
 
-# [NEW] 이 부분이 누락되어 404 에러가 발생했습니다. 다시 추가합니다.
 @router.get("/storage/audio/{filename}")
 def get_audio(filename: str):
     p = AUDIO_DIR / filename
@@ -214,9 +209,13 @@ def assistant_turn(
         idx = _next_turn_index(s, session_id)
         convo = _load_recent_conversation(s, session_id, limit=20)
         
-        tts_text, end_call = make_assistant_reply(convo)
-        if not tts_text:
-            tts_text = "응? 다시 말해줄래?"
+        if not convo:
+            tts_text = "안녕하세요! 건강지킴이입니다. 오늘 하루는 어떠셨나요?"
+            end_call = False
+        else:
+            tts_text, end_call = make_assistant_reply(convo)
+            if not tts_text:
+                tts_text = "응? 다시 말해줄래?"
 
         fname = f"{session_id}_assistant_{uuid.uuid4().hex}.wav"
         out_path = AUDIO_DIR / fname
@@ -259,15 +258,46 @@ def export_txt(session_id: str) -> PlainTextResponse:
     return PlainTextResponse("\n".join(lines))
 
 @router.get("/members")
-def list_members(search: str = "", limit: int = 200, offset: int = 0) -> Dict[str, Any]:
+def list_members(
+    search: str = "",
+    sort_by: str = "member_no", # 정렬 기준
+    order: str = "asc",         # 정렬 순서
+    limit: int = 200,
+    offset: int = 0
+) -> Dict[str, Any]:
+    
+    # 정렬 컬럼 매핑
+    sort_columns = {
+        "member_no": MemberModel.member_no,
+        "customer_name": MemberModel.customer_name,
+        "guardian_name": MemberModel.guardian_name,
+        "risk": MemberModel.risk,
+        "customer_phone": MemberModel.customer_phone,
+        "guardian_phone": MemberModel.guardian_phone,
+    }
+
     with db() as s:
         q = select(MemberModel)
+        
+        # 검색
         if search.strip():
             key = f"%{search.strip()}%"
             q = q.where(
                 (MemberModel.member_no.like(key)) |
-                (MemberModel.customer_name.like(key))
+                (MemberModel.customer_name.like(key)) |
+                (MemberModel.guardian_name.like(key))
             )
+        
+        # [수정] 정렬 로직 적용
+        if sort_by in sort_columns:
+            target_col = sort_columns[sort_by]
+            if order == "desc":
+                q = q.order_by(target_col.desc())
+            else:
+                q = q.order_by(target_col.asc())
+        else:
+            q = q.order_by(MemberModel.member_no.asc())
+
         q = q.limit(limit).offset(offset)
         rows = s.execute(q).scalars().all()
 

@@ -73,8 +73,8 @@
       </main>
     </div>
     <script>
-      console.log("index script loaded");
-      const API_BASE = "http://127.0.0.1:8001";
+      // [수정] 포트 번호를 8001 -> 8000으로 변경
+      const API_BASE = "http://127.0.0.1:8000";
       const PAGE_SIZE = 12;
 
       let members = [];
@@ -102,15 +102,19 @@
           offset: "0",
         });
 
-        const res = await fetch('${API_BASE}/members?${params.toString()}');
-        if (!res.ok) {
-          console.error("members fetch failed", await res.text());
-          return;
+        try {
+          const res = await fetch(`${API_BASE}/members?${params.toString()}`);
+          if (!res.ok) {
+            console.error("members fetch failed", await res.text());
+            return;
+          }
+          const data = await res.json();
+          members = data.items || [];
+          renderList(members);
+          updateCarets();
+        } catch (err) {
+          console.error("API Error:", err);
         }
-        const data = await res.json();
-        members = data.items || [];
-        renderList(members);
-        updateCarets();
       }
 
       function renderList(list, highlightNo = "") {
