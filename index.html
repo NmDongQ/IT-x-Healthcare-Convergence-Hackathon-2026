@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>뚝뚝 - 가입자 관리</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="topbar-inner">
+          <a class="brand" href="index.html">
+            <span class="logo-box" aria-hidden="true"></span>
+            <span>뚝뚝</span>
+          </a>
+          <nav class="nav" aria-label="주요 메뉴">
+            <a class="nav-link is-active" href="index.html">고객 관리</a>
+            <a class="nav-link" href="page-2.html">고객 관리</a>
+            <a class="nav-link" href="page-3.html">고객 관리</a>
+          </nav>
+          <div class="spacer"></div>
+          <button class="login-btn" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5Zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5Z" />
+            </svg>
+            로그인하기
+          </button>
+        </div>
+      </header>
+      <main class="content">
+        <h1 class="page-title">가입자 관리</h1>
+        <section aria-label="가입자 검색">
+          <div class="search-row">
+            <label class="search-field" for="memberSearch">
+              <input
+                id="memberSearch"
+                class="search-input"
+                type="search"
+                placeholder="찾으시는 고객이 계신가요?"
+                autocomplete="off"
+              />
+            </label>
+            <button class="search-btn" type="button" id="searchBtn">검색</button>
+          </div>
+        </section>
+        <section class="table-card" aria-label="가입자 리스트">
+          <div class="table-scroll">
+            <table class="member-table">
+              <thead>
+                <tr>
+                  <th>고객명 <span class="caret">∨</span></th>
+                  <th>보호자명 <span class="caret">∨</span></th>
+                  <th>회원번호 <span class="caret">∨</span></th>
+                  <th>위험도 <span class="caret">∨</span></th>
+                  <th>고객 연락처 <span class="caret">∨</span></th>
+                  <th>보호자 연락처 <span class="caret">∨</span></th>
+                </tr>
+              </thead>
+              <tbody id="memberList"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script>
+      const namePool = [
+        "김*준",
+        "박*준",
+        "이*지",
+        "최*연",
+        "정*우",
+        "강*민",
+        "조*은",
+        "윤*호",
+        "한*서",
+        "오*린",
+      ];
+      const guardianPool = [
+        "남*규",
+        "윤*희",
+        "최*수",
+        "유*진",
+        "신*아",
+        "김*경",
+        "조*람",
+        "박*원",
+        "정*인",
+        "이*솔",
+      ];
+      const riskPool = [92, 86, 78, 74, 68, 65, 61, 58, 52, 49];
+
+      const members = Array.from({ length: 50 }, (_, index) => {
+        const memberNo = String(12345600 + index + 1);
+        const customerName = namePool[index % namePool.length];
+        const guardianName = guardianPool[index % guardianPool.length];
+        const risk = riskPool[index % riskPool.length];
+        const customerPhone = `010-${(1200 + index)
+          .toString()
+          .padStart(4, "0")}-${(5600 + index)
+          .toString()
+          .padStart(4, "0")}`;
+        const guardianPhone = `010-${(2300 + index)
+          .toString()
+          .padStart(4, "0")}-${(7700 + index)
+          .toString()
+          .padStart(4, "0")}`;
+        return {
+          memberNo,
+          customerName,
+          guardianName,
+          risk,
+          customerPhone,
+          guardianPhone,
+        };
+      });
+
+      const listEl = document.getElementById("memberList");
+      const searchInput = document.getElementById("memberSearch");
+      const searchBtn = document.getElementById("searchBtn");
+      const scrollEl = document.querySelector(".table-scroll");
+      const topbar = document.querySelector(".topbar");
+      let lastWindowScroll = 0;
+      let lastTableScroll = 0;
+
+      const renderList = (list, highlightNo = "") => {
+        listEl.innerHTML = list
+          .map((member) => {
+            const highlightClass =
+              highlightNo && member.memberNo === highlightNo
+                ? "member-row is-highlight"
+                : "member-row";
+            return `
+              <tr class="${highlightClass}" data-member="${member.memberNo}">
+                <td>${member.customerName}</td>
+                <td>${member.guardianName}</td>
+                <td>${member.memberNo}</td>
+                <td><span class="risk-pill">${member.risk}%</span></td>
+                <td>${member.customerPhone}</td>
+                <td>${member.guardianPhone}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      };
+
+      const applySearch = () => {
+        const query = searchInput.value.trim();
+        if (!query) {
+          renderList(members);
+          return;
+        }
+        const found = members.find((member) => member.memberNo === query);
+        if (!found) {
+          renderList(members);
+          return;
+        }
+        const reordered = [found, ...members.filter((m) => m.memberNo !== query)];
+        renderList(reordered, query);
+        scrollEl.scrollTop = 0;
+      };
+
+      const updateHeaderVisibility = (current, last) => {
+        if (current > last && current > 12) {
+          topbar.classList.add("is-hidden");
+        } else if (current < last) {
+          topbar.classList.remove("is-hidden");
+        }
+        return current;
+      };
+
+      window.addEventListener("scroll", () => {
+        lastWindowScroll = updateHeaderVisibility(
+          window.scrollY,
+          lastWindowScroll,
+        );
+      });
+
+      scrollEl.addEventListener("scroll", () => {
+        lastTableScroll = updateHeaderVisibility(
+          scrollEl.scrollTop,
+          lastTableScroll,
+        );
+      });
+
+      searchBtn.addEventListener("click", applySearch);
+      searchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          applySearch();
+        }
+      });
+
+      renderList(members);
+    </script>
+  </body>
+</html>
