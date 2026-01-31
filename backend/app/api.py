@@ -9,100 +9,52 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, UploadFile, Depends
 from fastapi.responses import FileResponse, PlainTextResponse
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine, select, or_
-from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
+from sqlalchemy import select, or_
+from sqlalchemy.orm import Session as DBSession
 
-from .models import Member
-from .db import get_db
+# 통합된 DB 및 모델 사용
+from .db import get_db, SessionLocal, engine, Base, STORAGE_DIR
+from .models import Session as SessionModel, Turn as TurnModel, Member as MemberModel
 
-from .services.llm import evaluate_transcript, make_assistant_reply
+from .services.llm import evaluate_transcript, make_assistant_reply, generate_final_report
 from .services.stt import transcribe_audio
 from .services.tts import synthesize_speech_to_wav
 
-Base = declarative_base()
-
-ROOT_DIR = Path(__file__).resolve().parents[2]
-STORAGE_DIR = ROOT_DIR / "storage"
 AUDIO_DIR = STORAGE_DIR / "audio"
-DB_PATH = STORAGE_DIR / "app.sqlite3"
-
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-engine = create_engine(f"sqlite:///{DB_PATH}", future=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
-
-
-def now_utc_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class SessionRow(Base):
-    __tablename__ = "sessions"
-    session_id = Column(String(32), primary_key=True)
-    device_info = Column(String(200), nullable=True)
-    started_at_utc = Column(String(40), nullable=False)
-    ended_at_utc = Column(String(40), nullable=True)
-
-    turns = relationship("TurnRow", back_populates="session", cascade="all, delete-orphan")
-
-
-class TurnRow(Base):
-    __tablename__ = "turns"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String(32), ForeignKey("sessions.session_id"), index=True, nullable=False)
-    turn_index = Column(Integer, nullable=False)
-    speaker = Column(String(16), nullable=False)  # "user" or "assistant"
-    start_ms = Column(Integer, nullable=False)
-    end_ms = Column(Integer, nullable=False)
-    text = Column(Text, nullable=True)
-    audio_path = Column(String(500), nullable=True)
-    meta_json = Column(Text, nullable=True)
-
-    session = relationship("SessionRow", back_populates="turns")
-
-class MemberRow(Base):
-    __tablename__ = "members"
-
-    member_no = Column(String(32), primary_key=True)  # 회원번호
-    customer_name = Column(String(50), nullable=False)
-    guardian_name = Column(String(50), nullable=False)
-    risk = Column(Integer, nullable=False)  # 0~100
-    customer_phone = Column(String(30), nullable=False)
-    guardian_phone = Column(String(30), nullable=False)
-    created_at_utc = Column(String(40), nullable=False, default=now_utc_iso)
-
-
+# 테이블 생성 (models.py 정의 기반)
 Base.metadata.create_all(engine)
 
 router = APIRouter()
 
-
-def db() -> Session:
+# 헬퍼: DB 세션 생성
+def db() -> DBSession:
     return SessionLocal()
 
+def now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
-def _get_session_or_404(s: Session, session_id: str) -> SessionRow:
-    row = s.get(SessionRow, session_id)
+def _get_session_or_404(s: DBSession, session_id: str) -> SessionModel:
+    row = s.get(SessionModel, session_id)
     if not row:
         raise HTTPException(status_code=404, detail="session not found")
     return row
 
-
-def _next_turn_index(s: Session, session_id: str) -> int:
-    q = select(TurnRow.turn_index).where(TurnRow.session_id == session_id).order_by(TurnRow.turn_index.desc()).limit(1)
+def _next_turn_index(s: DBSession, session_id: str) -> int:
+    q = select(TurnModel.turn_index).where(TurnModel.session_id == session_id).order_by(TurnModel.turn_index.desc()).limit(1)
     last = s.execute(q).scalar_one_or_none()
     return int(last + 1) if last is not None else 1
 
-
-def _load_recent_conversation(s: Session, session_id: str, limit: int = 10) -> List[Dict[str, str]]:
+def _load_recent_conversation(s: DBSession, session_id: str, limit: int = 20) -> List[Dict[str, str]]:
     q = (
-        select(TurnRow)
-        .where(TurnRow.session_id == session_id)
-        .order_by(TurnRow.turn_index.asc())
+        select(TurnModel)
+        .where(TurnModel.session_id == session_id)
+        .order_by(TurnModel.turn_index.asc())
     )
     rows = s.execute(q).scalars().all()
-    rows = rows[-limit:] if len(rows) > limit else rows
+    # 전체 맥락을 위해 limit을 좀 넉넉히 잡거나, 필요하면 슬라이싱
+    subset = rows[-limit:] if len(rows) > limit else rows
 
     convo: List[Dict[str, str]] = []
     for r in rows:
@@ -110,8 +62,9 @@ def _load_recent_conversation(s: Session, session_id: str, limit: int = 10) -> L
             continue
         role = "user" if r.speaker == "user" else "assistant"
         convo.append({"role": role, "content": r.text})
-    return convo
+    return convo # 전체 대화 반환
 
+# --- API ENDPOINTS ---
 
 @router.post("/session/start")
 def start_session(device_info: str = Form(default="")) -> Dict[str, Any]:
@@ -119,7 +72,7 @@ def start_session(device_info: str = Form(default="")) -> Dict[str, Any]:
     started = now_utc_iso()
 
     with db() as s:
-        row = SessionRow(
+        row = SessionModel(
             session_id=session_id,
             device_info=device_info[:200] if device_info else None,
             started_at_utc=started,
@@ -130,15 +83,65 @@ def start_session(device_info: str = Form(default="")) -> Dict[str, Any]:
 
     return {"session_id": session_id, "started_at_utc": started}
 
-
 @router.post("/session/end")
 def end_session(session_id: str = Form(...)) -> Dict[str, Any]:
     with db() as s:
         row = _get_session_or_404(s, session_id)
         row.ended_at_utc = now_utc_iso()
         s.commit()
-        return {"session_id": row.session_id, "ended_at_utc": row.ended_at_utc}
+        # commit 후에는 객체가 만료되므로 필요한 데이터만 리턴하거나 refresh 해야 함
+        return {"session_id": session_id, "ended_at_utc": now_utc_iso()}
 
+@router.post("/session/{session_id}/finalize")
+def finalize_session_endpoint(session_id: str) -> Dict[str, Any]:
+    """
+    통화 종료 후 종합 리포트 생성 및 DB 영구 저장
+    """
+    with db() as s:
+        row = _get_session_or_404(s, session_id)
+        
+        # 아직 종료 시간이 없으면 기록
+        if not row.ended_at_utc:
+            row.ended_at_utc = now_utc_iso()
+        
+        # 1. 전체 대화 로드
+        convo = _load_recent_conversation(s, session_id, limit=100)
+        
+        # 2. 리포트 생성 (LLM)
+        report_data = generate_final_report(convo)
+        
+        # 3. DB에 저장 (JSON 문자열로 변환)
+        row.final_report = json.dumps(report_data, ensure_ascii=False)
+        s.commit()
+        
+        # 4. 응답 데이터 준비 (세션 종료 후 객체 접근 방지를 위해 변수에 담기)
+        # DetachedInstanceError 방지를 위해 값 복사
+        response_data = {
+            "session_id": row.session_id,
+            "ended_at_utc": row.ended_at_utc,
+            "report": report_data
+        }
+
+    return response_data
+
+@router.get("/session/{session_id}/report")
+def get_session_report(session_id: str) -> Dict[str, Any]:
+    """
+    저장된 리포트 조회 (다른 프론트엔드에서 사용 가능)
+    """
+    with db() as s:
+        row = _get_session_or_404(s, session_id)
+        report = None
+        if row.final_report:
+            try:
+                report = json.loads(row.final_report)
+            except:
+                report = {"error": "Invalid JSON format"}
+        
+        return {
+            "session_id": row.session_id,
+            "report": report
+        }
 
 @router.post("/turn/user")
 def user_turn(
@@ -155,28 +158,33 @@ def user_turn(
 
         idx = _next_turn_index(s, session_id)
 
-        ext = Path(audio.filename or "").suffix.lower() or ".wav"
-        fname = f"{session_id}_user_{uuid.uuid4().hex}{ext}"
+        # 확장자 처리
+        original_ext = Path(audio.filename or "").suffix.lower()
+        if not original_ext:
+            original_ext = ".webm"
+            
+        fname = f"{session_id}_user_{uuid.uuid4().hex}{original_ext}"
         out_path = AUDIO_DIR / fname
 
         data = audio.file.read()
         out_path.write_bytes(data)
 
+        # STT
         transcript = transcribe_audio(out_path)
         if not transcript:
             transcript = "(전사 실패)"
 
+        # 평가
         context = _load_recent_conversation(s, session_id, limit=10)
         llm_eval = evaluate_transcript(transcript, context=context)
-
         risk_prob = float(llm_eval.get("risk_probability", 0.0))
-
+        
         meta = {
             "llm_evaluation": llm_eval,
             "risk_prob": risk_prob,
         }
 
-        row = TurnRow(
+        row = TurnModel(
             session_id=session_id,
             turn_index=idx,
             speaker="user",
@@ -207,16 +215,12 @@ def assistant_turn(
     start_ms: int = Form(...),
     end_ms: int = Form(...),
 ) -> Dict[str, Any]:
-    if end_ms < start_ms:
-        raise HTTPException(status_code=400, detail="end_ms must be >= start_ms")
-
     with db() as s:
         _get_session_or_404(s, session_id)
-
         idx = _next_turn_index(s, session_id)
-
-        convo = _load_recent_conversation(s, session_id, limit=12)
-        tts_text = make_assistant_reply(convo)
+        convo = _load_recent_conversation(s, session_id, limit=20)
+        
+        tts_text, end_call = make_assistant_reply(convo)
         if not tts_text:
             tts_text = "응? 다시 말해줄래?"
 
@@ -224,7 +228,9 @@ def assistant_turn(
         out_path = AUDIO_DIR / fname
         synthesize_speech_to_wav(tts_text, out_path)
 
-        row = TurnRow(
+        meta = {"end_call": end_call}
+
+        row = TurnModel(
             session_id=session_id,
             turn_index=idx,
             speaker="assistant",
@@ -232,7 +238,7 @@ def assistant_turn(
             end_ms=int(end_ms),
             text=tts_text,
             audio_path=str(out_path),
-            meta_json=None,
+            meta_json=json.dumps(meta),
         )
         s.add(row)
         s.commit()
@@ -240,168 +246,71 @@ def assistant_turn(
         return {
             "turn_index": idx,
             "speaker": "assistant",
-            "start_ms": int(start_ms),
-            "end_ms": int(end_ms),
             "tts_text": tts_text,
             "audio_path": str(out_path),
             "audio_url": f"/storage/audio/{out_path.name}",
+            "meta_json": meta,
         }
 
+# --- EXPORT & MEMBER API ---
 
 @router.get("/session/{session_id}/export/txt")
 def export_txt(session_id: str) -> PlainTextResponse:
     with db() as s:
         _get_session_or_404(s, session_id)
-        q = select(TurnRow).where(TurnRow.session_id == session_id).order_by(TurnRow.turn_index.asc())
+        q = select(TurnModel).where(TurnModel.session_id == session_id).order_by(TurnModel.turn_index.asc())
         rows = s.execute(q).scalars().all()
 
-    lines: List[str] = []
+    lines = []
     for r in rows:
-        a = r.start_ms / 1000.0
-        b = r.end_ms / 1000.0
-        lines.append(f"[{a:0.3f} - {b:0.3f}] {r.speaker}: {r.text or ''}")
+        lines.append(f"[{r.start_ms/1000:.1f}s] {r.speaker}: {r.text or ''}")
     return PlainTextResponse("\n".join(lines))
 
-
-@router.get("/session/{session_id}/export/json")
-def export_json(session_id: str) -> Dict[str, Any]:
-    with db() as s:
-        sess = _get_session_or_404(s, session_id)
-        q = select(TurnRow).where(TurnRow.session_id == session_id).order_by(TurnRow.turn_index.asc())
-        rows = s.execute(q).scalars().all()
-
-    turns: List[Dict[str, Any]] = []
-    for r in rows:
-        meta_obj: Optional[Dict[str, Any]] = None
-        risk_prob: Optional[float] = None
-        if r.meta_json:
-            try:
-                meta_obj = json.loads(r.meta_json)
-                risk_prob = meta_obj.get("risk_prob")
-            except Exception:
-                meta_obj = None
-
-        turns.append(
-            {
-                "turn_index": r.turn_index,
-                "speaker": r.speaker,
-                "start_ms": r.start_ms,
-                "end_ms": r.end_ms,
-                "text": r.text,
-                "audio_path": r.audio_path,
-                "audio_url": f"/storage/audio/{Path(r.audio_path).name}" if r.audio_path else None,
-                "risk_prob": risk_prob,
-                "meta_json": meta_obj,
-            }
-        )
-
-    return {
-        "session_id": sess.session_id,
-        "started_at_utc": sess.started_at_utc,
-        "ended_at_utc": sess.ended_at_utc,
-        "turns": turns,
-    }
-
-
-@router.get("/storage/audio/{filename}")
-def get_audio(filename: str):
-    p = AUDIO_DIR / filename
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="file not found")
-    return FileResponse(str(p), media_type="audio/wav")
-
-
 @router.get("/members")
-def list_members(
-    search: str = "",            # 회원번호 or 이름 부분검색
-    sort_by: str = "member_no",  # member_no, customer_name, guardian_name, risk, customer_phone, guardian_phone
-    order: str = "asc",          # asc | desc
-    limit: int = 200,
-    offset: int = 0,
-) -> Dict[str, Any]:
-    allowed = {
-        "member_no": MemberRow.member_no,
-        "customer_name": MemberRow.customer_name,
-        "guardian_name": MemberRow.guardian_name,
-        "risk": MemberRow.risk,
-        "customer_phone": MemberRow.customer_phone,
-        "guardian_phone": MemberRow.guardian_phone,
-    }
-    if sort_by not in allowed:
-        raise HTTPException(status_code=400, detail="invalid sort_by")
-    if order not in ("asc", "desc"):
-        raise HTTPException(status_code=400, detail="invalid order")
-
-    sort_col = allowed[sort_by]
-    sort_expr = sort_col.asc() if order == "asc" else sort_col.desc()
-
+def list_members(search: str = "", limit: int = 200, offset: int = 0) -> Dict[str, Any]:
     with db() as s:
-        q = select(MemberRow)
-
+        q = select(MemberModel)
         if search.strip():
             key = f"%{search.strip()}%"
             q = q.where(
-                (MemberRow.member_no.like(key)) |
-                (MemberRow.customer_name.like(key)) |
-                (MemberRow.guardian_name.like(key))
+                (MemberModel.member_no.like(key)) |
+                (MemberModel.customer_name.like(key))
             )
-
-        q = q.order_by(sort_expr).limit(limit).offset(offset)
+        q = q.limit(limit).offset(offset)
         rows = s.execute(q).scalars().all()
 
     items = []
     for r in rows:
-        items.append(
-            {
-                "memberNo": r.member_no,
-                "customerName": r.customer_name,
-                "guardianName": r.guardian_name,
-                "risk": r.risk,
-                "customerPhone": r.customer_phone,
-                "guardianPhone": r.guardian_phone,
-            }
-        )
-
+        items.append({
+            "memberNo": r.member_no,
+            "customerName": r.customer_name,
+            "guardianName": r.guardian_name,
+            "risk": r.risk,
+            "customerPhone": r.customer_phone,
+            "guardianPhone": r.guardian_phone,
+        })
     return {"items": items, "count": len(items)}
-
 
 @router.post("/members/seed")
 def seed_members() -> Dict[str, Any]:
-    name_pool = ["김*준","박*준","이*지","최*연","정*우","강*민","조*은","윤*호","한*서","오*린"]
-    guardian_pool = ["남*규","윤*희","최*수","유*진","신*아","김*경","조*람","박*원","정*인","이*솔"]
-    risk_pool = [92, 86, 78, 74, 68, 65, 61, 58, 52, 49]
-
-    members = []
-    for index in range(50):
-        member_no = str(12345600 + index + 1)
-        customer_name = name_pool[index % len(name_pool)]
-        guardian_name = guardian_pool[index % len(guardian_pool)]
-        risk = risk_pool[index % len(risk_pool)]
-        customer_phone = f"010-{str(1200+index).zfill(4)}-{str(5600+index).zfill(4)}"
-        guardian_phone = f"010-{str(2300+index).zfill(4)}-{str(7700+index).zfill(4)}"
-        members.append((member_no, customer_name, guardian_name, risk, customer_phone, guardian_phone))
-
-    inserted = 0
+    name_pool = ["김*준","박*준","이*지","최*연","정*우"]
+    # ... (간소화) ...
+    
     with db() as s:
-        for m in members:
-            if s.get(MemberRow, m[0]) is not None:
-                continue
-            s.add(
-                MemberRow(
-                    member_no=m[0],
-                    customer_name=m[1],
-                    guardian_name=m[2],
-                    risk=m[3],
-                    customer_phone=m[4],
-                    guardian_phone=m[5],
-                    created_at_utc=now_utc_iso(),
-                )
+        # 이미 데이터가 있으면 pass
+        if s.execute(select(MemberModel).limit(1)).scalar_one_or_none():
+            return {"inserted": 0}
+
+        for i in range(10):
+            m = MemberModel(
+                member_no=str(1000+i),
+                customer_name=name_pool[i%5],
+                guardian_name="보호자"+str(i),
+                risk=50+i,
+                customer_phone="010-0000-0000",
+                guardian_phone="010-1111-1111",
+                created_at_utc=now_utc_iso()
             )
-            inserted += 1
+            s.add(m)
         s.commit()
-
-    return {"inserted": inserted}
-
-
-app = FastAPI()
-app.include_router(router)
+    return {"inserted": 10}

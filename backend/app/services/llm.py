@@ -90,35 +90,56 @@ def _normalize_eval(obj: Dict[str, Any]) -> Dict[str, Any]:
     return norm
 
 
+# --- CHAT / TURN MANAGEMENT ---
+
 CHAT_SYSTEM_PROMPT = """
-너는 귀엽고 친절한 어린애 말투의 통화 상대야.
-사용자의 말을 잘 듣고 자연스럽게 짧게 대답해.
-한 번에 1~2문장.
-질문은 한 번에 하나만.
-사용자의 말을 요약하거나 되묻는 것도 좋아.
+너는 시골에 사시는 어르신에게 안부 전화를 건 '건강지킴이'야.
+손주나 딸처럼 친근하고 밝은 말투(반말/존댓말 섞어서 자연스럽게)를 써.
+어르신의 건강, 식사, 기분 등을 물어봐.
+한 번에 1~2문장으로 짧게 대답해.
+
+[중요]
+대화가 3~4턴 이상 진행되어 충분하다고 판단되거나, 어르신이 그만 끊자고 하면
+마무리 인사를 하고 문장 맨 끝에 반드시 "[END]"라고 붙여.
 """.strip()
 
 
-def make_assistant_reply(conversation: List[Dict[str, str]]) -> str:
+def make_assistant_reply(conversation: List[Dict[str, str]]) -> tuple[str, bool]:
+    """
+    Returns: (reply_text, end_call_flag)
+    """
+    # 대화 턴 수 계산 (시스템 프롬프트 제외)
+    # conversation에는 user, assistant 턴이 섞여 있음
+    # 너무 길어지면 강제 종료 유도 가능
+    
     resp = client.responses.create(
         model=CHAT_MODEL,
-        temperature=0.4,
+        temperature=0.7,
         input=[
             {"role": "system", "content": CHAT_SYSTEM_PROMPT},
             *conversation,
         ],
     )
-    return (resp.output_text or "").strip()
+    raw_text = (resp.output_text or "").strip()
 
+    end_call = False
+    if "[END]" in raw_text:
+        end_call = True
+        raw_text = raw_text.replace("[END]", "").strip()
+
+    return raw_text, end_call
+
+
+# --- EVALUATION (PER TURN) ---
 
 EVAL_SYSTEM_PROMPT = """
 너는 의료 진단을 하지 않는다.
 너의 역할은 오직 '일상 대화에서 관찰되는 언어적 위험 신호'를 구조화해 보고하는 것이다.
 
 판단 기준:
-- 의미론적 손상
-- 정보 전달 손상
-- 구문론적 손상
+- 의미론적 손상 (대명사 과다, 모호함 등)
+- 정보 전달 손상 (핵심 정보 누락 등)
+- 구문론적 손상 (문장 파편화 등)
 
 규칙:
 - 점수는 0~3의 정수
@@ -129,32 +150,14 @@ EVAL_SYSTEM_PROMPT = """
 """.strip()
 
 EVAL_SCHEMA = """
-출력 JSON 스키마(반드시 그대로의 키를 사용):
+출력 JSON 스키마:
 {
-  "semantic_impairment": {
-    "pronoun_overuse": 0,
-    "vagueness": 0,
-    "lexical_poverty": 0,
-    "repetition": 0
-  },
-  "information_impairment": {
-    "missing_core_info": 0,
-    "low_specificity": 0,
-    "inappropriate_reference": 0
-  },
-  "syntactic_impairment": {
-    "verb_reduction": 0,
-    "sentence_fragments": 0,
-    "syntactic_simplification": 0
-  },
-  "acoustic_abnormality": {
-    "not_evaluated": true
-  },
+  "semantic_impairment": { "pronoun_overuse": 0, "vagueness": 0, "lexical_poverty": 0, "repetition": 0 },
+  "information_impairment": { "missing_core_info": 0, "low_specificity": 0, "inappropriate_reference": 0 },
+  "syntactic_impairment": { "verb_reduction": 0, "sentence_fragments": 0, "syntactic_simplification": 0 },
+  "acoustic_abnormality": { "not_evaluated": true },
   "risk_probability": 0.0,
-  "rationale": {
-    "summary": "",
-    "evidence_sentences": []
-  }
+  "rationale": { "summary": "", "evidence_sentences": [] }
 }
 """.strip()
 
@@ -191,5 +194,60 @@ def evaluate_transcript(transcript: str, context: List[Dict[str, str]] | None = 
     )
 
     raw = (resp.output_text or "").strip()
-    obj = _safe_json_loads(raw)
+    try:
+        obj = _safe_json_loads(raw)
+    except Exception:
+        # 실패 시 기본값
+        return {
+            "risk_probability": 0.0, 
+            "rationale": {"summary": "분석 실패", "evidence_sentences": []}
+        }
     return _normalize_eval(obj)
+
+
+# --- FINAL REPORT ---
+
+REPORT_SYSTEM_PROMPT = """
+너는 노인 인지 건강 관리 전문가야.
+사용자와 AI의 전체 통화 내용을 바탕으로 종합 보고서를 작성해.
+치매 위험 징후가 있었는지, 대화 흐름은 어땠는지 요약해줘.
+JSON 포맷으로 출력해.
+""".strip()
+
+REPORT_SCHEMA = """
+{
+  "final_risk_score": 0.0,
+  "summary_text": "전체적인 대화 요약 및 특이사항..."
+}
+""".strip()
+
+def generate_final_report(conversation: List[Dict[str, str]]) -> Dict[str, Any]:
+    # 전체 대화 텍스트화
+    lines = []
+    for turn in conversation:
+        r = turn.get("role", "unknown")
+        t = turn.get("content", "")
+        lines.append(f"{r}: {t}")
+    full_text = "\n".join(lines)
+
+    user_prompt = (
+        "다음은 전체 통화 내역이다.\n"
+        + full_text
+        + "\n\n위 내용을 바탕으로 인지 건강 관점의 종합 리포트를 키워드를 중심으로 작성하라.\n"
+        + REPORT_SCHEMA
+    )
+
+    resp = client.responses.create(
+        model=EVAL_MODEL,
+        temperature=0,
+        input=[
+            {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    
+    raw = (resp.output_text or "").strip()
+    try:
+        return _safe_json_loads(raw)
+    except:
+        return {"final_risk_score": 0.0, "summary_text": "리포트 생성 실패"}

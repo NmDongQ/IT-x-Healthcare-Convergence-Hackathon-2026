@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>건강지킴이 뚝뚝 - 안부 전화</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="call.css">
+</head>
+<body>
+
+  <div id="idle-screen" class="screen is-active">
+    <div class="clock-container">
+      <div id="digital-clock">00:00</div>
+      <div class="date-text" id="date-text">1월 1일 월요일</div>
+    </div>
+    <div class="idle-message">편안한 하루 되세요.</div>
+  </div>
+
+  <div id="incoming-screen" class="screen">
+    <div class="caller-info">
+      <div class="profile-icon"></div>
+      <div class="caller-name">건강지킴이</div>
+      <div class="caller-number">02-1234-5678</div>
+    </div>
+    <div class="action-buttons">
+      <button id="btn-decline" class="btn-circle decline">
+        <svg viewBox="0 0 24 24"><path d="M12 9c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-2c2.21 0 4 1.79 4 4s-1.79 4-4 4-4-1.79-4-4 1.79-4 4-4zm0 10c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z" fill="currentColor"/></svg>
+        <span>거절</span>
+      </button>
+      <button id="btn-accept" class="btn-circle accept">
+        <svg viewBox="0 0 24 24"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 1.25 0 2.45.2 3.57.57.35.13.44.52.24 1.02l-2.2 2.2z" fill="currentColor"/></svg>
+        <span>받기</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="in-call-screen" class="screen">
+    <div class="call-status-bar">
+      <span>건강지킴이</span>
+      <span id="call-timer">00:00</span>
+    </div>
+
+    <div class="ai-visualizer">
+      <div class="wave-box" id="ai-wave">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="status-text" id="status-text">연결되었습니다.</div>
+    </div>
+
+    <div class="controls-area">
+      <button id="btn-mic" class="mic-button">
+        <div class="mic-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+        </div>
+        <span id="mic-label">말하기</span>
+      </button>
+      
+      <button id="btn-hangup" class="hangup-button">
+        종료
+      </button>
+    </div>
+    
+    <div id="debug-log"></div>
+  </div>
+
+  <script src="call.js"></script>
+</body>
+</html>
