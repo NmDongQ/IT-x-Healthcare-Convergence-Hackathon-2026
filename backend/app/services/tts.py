@@ -7,12 +7,14 @@ from openai import OpenAI
 client = OpenAI()
 
 TTS_MODEL = "gpt-4o-mini-tts"
-TTS_VOICE = "marin"
+TTS_VOICE = "echo"
 
 VOICE_INSTRUCTIONS = """
-너는 귀엽고 밝은 어린애 톤으로 말한다.
-말은 또박또박.
-속도는 너무 빠르지 않게.
+너는 트로트 가수가 무대에서 관객에게 말하듯이 응답한다.
+말투는 밝고 정감 있으며, 음절 하나하나를 살려 또박또박 발음한다.
+리듬을 타듯 자연스러운 억양을 사용하되 과장되지는 않는다.
+속도는 빠르지 않고, 여유 있게 끌어주며 말한다.
+전체적으로 노래를 부르듯 흥과 정서가 느껴지는 화법을 유지한다.
 """.strip()
 
 
