@@ -49,12 +49,12 @@
             <table class="member-table">
               <thead>
                 <tr>
-                  <th>고객명 <span class="caret">∨</span></th>
-                  <th>보호자명 <span class="caret">∨</span></th>
-                  <th>회원번호 <span class="caret">∨</span></th>
-                  <th>위험도 <span class="caret">∨</span></th>
-                  <th>고객 연락처 <span class="caret">∨</span></th>
-                  <th>보호자 연락처 <span class="caret">∨</span></th>
+                  <th data-key="customer_name">고객명 <span class="caret"></span></th>
+                  <th data-key="guardian_name">보호자명 <span class="caret"></span></th>
+                  <th data-key="member_no">회원번호 <span class="caret"></span></th>
+                  <th data-key="risk">위험도 <span class="caret"></span></th>
+                  <th data-key="customer_phone">고객 연락처 <span class="caret"></span></th>
+                  <th data-key="guardian_phone">보호자 연락처 <span class="caret"></span></th>
                 </tr>
               </thead>
               <tbody id="memberList"></tbody>
@@ -64,66 +64,43 @@
       </main>
     </div>
     <script>
-      const namePool = [
-        "김*준",
-        "박*준",
-        "이*지",
-        "최*연",
-        "정*우",
-        "강*민",
-        "조*은",
-        "윤*호",
-        "한*서",
-        "오*린",
-      ];
-      const guardianPool = [
-        "남*규",
-        "윤*희",
-        "최*수",
-        "유*진",
-        "신*아",
-        "김*경",
-        "조*람",
-        "박*원",
-        "정*인",
-        "이*솔",
-      ];
-      const riskPool = [92, 86, 78, 74, 68, 65, 61, 58, 52, 49];
+      const API_BASE = "http://localhost:8000";
 
-      const members = Array.from({ length: 50 }, (_, index) => {
-        const memberNo = String(12345600 + index + 1);
-        const customerName = namePool[index % namePool.length];
-        const guardianName = guardianPool[index % guardianPool.length];
-        const risk = riskPool[index % riskPool.length];
-        const customerPhone = `010-${(1200 + index)
-          .toString()
-          .padStart(4, "0")}-${(5600 + index)
-          .toString()
-          .padStart(4, "0")}`;
-        const guardianPhone = `010-${(2300 + index)
-          .toString()
-          .padStart(4, "0")}-${(7700 + index)
-          .toString()
-          .padStart(4, "0")}`;
-        return {
-          memberNo,
-          customerName,
-          guardianName,
-          risk,
-          customerPhone,
-          guardianPhone,
-        };
-      });
+      let members = [];
+      let sortBy = "member_no";
+      let sortOrder = "asc";
+      let currentSearch = "";
 
       const listEl = document.getElementById("memberList");
       const searchInput = document.getElementById("memberSearch");
       const searchBtn = document.getElementById("searchBtn");
       const scrollEl = document.querySelector(".table-scroll");
       const topbar = document.querySelector(".topbar");
+
       let lastWindowScroll = 0;
       let lastTableScroll = 0;
 
-      const renderList = (list, highlightNo = "") => {
+      async function fetchMembers() {
+        const params = new URLSearchParams({
+          search: currentSearch,
+          sort_by: sortBy,
+          order: sortOrder,
+          limit: "200",
+          offset: "0",
+        });
+
+        const res = await fetch(`${API_BASE}/members?${params.toString()}`);
+        if (!res.ok) {
+          console.error("members fetch failed", await res.text());
+          return;
+        }
+        const data = await res.json();
+        members = data.items || [];
+        renderList(members);
+        updateCarets();
+      }
+
+      function renderList(list, highlightNo = "") {
         listEl.innerHTML = list
           .map((member) => {
             const highlightClass =
@@ -142,55 +119,73 @@
             `;
           })
           .join("");
-      };
+      }
 
-      const applySearch = () => {
+      function updateCarets() {
+        document.querySelectorAll(".member-table thead th[data-key]").forEach((th) => {
+          const key = th.getAttribute("data-key");
+          const caret = th.querySelector(".caret");
+          if (!caret) return;
+
+          if (key !== sortBy) {
+            caret.textContent = "";
+            return;
+          }
+          caret.textContent = sortOrder === "asc" ? "▲" : "▼";
+        });
+      }
+
+      function onHeaderClick(th) {
+        const key = th.getAttribute("data-key");
+        if (!key) return;
+
+        if (sortBy === key) {
+          sortOrder = sortOrder === "asc" ? "desc" : "asc";
+        } else {
+          sortBy = key;
+          sortOrder = "asc";
+        }
+        fetchMembers();
+      }
+
+      function applySearch() {
         const query = searchInput.value.trim();
-        if (!query) {
-          renderList(members);
-          return;
-        }
-        const found = members.find((member) => member.memberNo === query);
-        if (!found) {
-          renderList(members);
-          return;
-        }
-        const reordered = [found, ...members.filter((m) => m.memberNo !== query)];
-        renderList(reordered, query);
-        scrollEl.scrollTop = 0;
-      };
+        currentSearch = query;
+        fetchMembers().then(() => {
+          if (!query) return;
+          const found = members.find((m) => m.memberNo === query);
+          if (found) scrollEl.scrollTop = 0;
+        });
+      }
 
-      const updateHeaderVisibility = (current, last) => {
+      function updateHeaderVisibility(current, last) {
         if (current > last && current > 12) {
           topbar.classList.add("is-hidden");
         } else if (current < last) {
           topbar.classList.remove("is-hidden");
         }
         return current;
-      };
+      }
 
       window.addEventListener("scroll", () => {
-        lastWindowScroll = updateHeaderVisibility(
-          window.scrollY,
-          lastWindowScroll,
-        );
+        lastWindowScroll = updateHeaderVisibility(window.scrollY, lastWindowScroll);
       });
 
       scrollEl.addEventListener("scroll", () => {
-        lastTableScroll = updateHeaderVisibility(
-          scrollEl.scrollTop,
-          lastTableScroll,
-        );
+        lastTableScroll = updateHeaderVisibility(scrollEl.scrollTop, lastTableScroll);
       });
 
       searchBtn.addEventListener("click", applySearch);
       searchInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          applySearch();
-        }
+        if (event.key === "Enter") applySearch();
       });
 
-      renderList(members);
+      document.querySelectorAll(".member-table thead th[data-key]").forEach((th) => {
+        th.style.cursor = "pointer";
+        th.addEventListener("click", () => onHeaderClick(th));
+      });
+
+      fetchMembers();
     </script>
   </body>
 </html>

@@ -58,6 +58,17 @@ class TurnRow(Base):
 
     session = relationship("SessionRow", back_populates="turns")
 
+class MemberRow(Base):
+    __tablename__ = "members"
+
+    member_no = Column(String(32), primary_key=True)  # 회원번호
+    customer_name = Column(String(50), nullable=False)
+    guardian_name = Column(String(50), nullable=False)
+    risk = Column(Integer, nullable=False)  # 0~100
+    customer_phone = Column(String(30), nullable=False)
+    guardian_phone = Column(String(30), nullable=False)
+    created_at_utc = Column(String(40), nullable=False, default=now_utc_iso)
+
 
 Base.metadata.create_all(engine)
 
@@ -295,6 +306,98 @@ def get_audio(filename: str):
     if not p.exists():
         raise HTTPException(status_code=404, detail="file not found")
     return FileResponse(str(p), media_type="audio/wav")
+
+
+@router.get("/members")
+def list_members(
+    search: str = "",            # 회원번호 or 이름 부분검색
+    sort_by: str = "member_no",  # member_no, customer_name, guardian_name, risk, customer_phone, guardian_phone
+    order: str = "asc",          # asc | desc
+    limit: int = 200,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    allowed = {
+        "member_no": MemberRow.member_no,
+        "customer_name": MemberRow.customer_name,
+        "guardian_name": MemberRow.guardian_name,
+        "risk": MemberRow.risk,
+        "customer_phone": MemberRow.customer_phone,
+        "guardian_phone": MemberRow.guardian_phone,
+    }
+    if sort_by not in allowed:
+        raise HTTPException(status_code=400, detail="invalid sort_by")
+    if order not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="invalid order")
+
+    sort_col = allowed[sort_by]
+    sort_expr = sort_col.asc() if order == "asc" else sort_col.desc()
+
+    with db() as s:
+        q = select(MemberRow)
+
+        if search.strip():
+            key = f"%{search.strip()}%"
+            q = q.where(
+                (MemberRow.member_no.like(key)) |
+                (MemberRow.customer_name.like(key)) |
+                (MemberRow.guardian_name.like(key))
+            )
+
+        q = q.order_by(sort_expr).limit(limit).offset(offset)
+        rows = s.execute(q).scalars().all()
+
+    items = []
+    for r in rows:
+        items.append(
+            {
+                "memberNo": r.member_no,
+                "customerName": r.customer_name,
+                "guardianName": r.guardian_name,
+                "risk": r.risk,
+                "customerPhone": r.customer_phone,
+                "guardianPhone": r.guardian_phone,
+            }
+        )
+
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/members/seed")
+def seed_members() -> Dict[str, Any]:
+    name_pool = ["김*준","박*준","이*지","최*연","정*우","강*민","조*은","윤*호","한*서","오*린"]
+    guardian_pool = ["남*규","윤*희","최*수","유*진","신*아","김*경","조*람","박*원","정*인","이*솔"]
+    risk_pool = [92, 86, 78, 74, 68, 65, 61, 58, 52, 49]
+
+    members = []
+    for index in range(50):
+        member_no = str(12345600 + index + 1)
+        customer_name = name_pool[index % len(name_pool)]
+        guardian_name = guardian_pool[index % len(guardian_pool)]
+        risk = risk_pool[index % len(risk_pool)]
+        customer_phone = f"010-{str(1200+index).zfill(4)}-{str(5600+index).zfill(4)}"
+        guardian_phone = f"010-{str(2300+index).zfill(4)}-{str(7700+index).zfill(4)}"
+        members.append((member_no, customer_name, guardian_name, risk, customer_phone, guardian_phone))
+
+    inserted = 0
+    with db() as s:
+        for m in members:
+            if s.get(MemberRow, m[0]) is not None:
+                continue
+            s.add(
+                MemberRow(
+                    member_no=m[0],
+                    customer_name=m[1],
+                    guardian_name=m[2],
+                    risk=m[3],
+                    customer_phone=m[4],
+                    guardian_phone=m[5],
+                    created_at_utc=now_utc_iso(),
+                )
+            )
+            inserted += 1
+        s.commit()
+
+    return {"inserted": inserted}
 
 
 app = FastAPI()
