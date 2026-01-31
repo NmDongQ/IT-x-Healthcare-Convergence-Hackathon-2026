@@ -1,12 +1,20 @@
-const API_BASE = "http://localhost:8000"; // 실제 서버 주소로 변경
+const API_BASE = "http://localhost:8000"; // 실제 서버 주소
 
 // --- GLOBAL STATE ---
 let currentState = "IDLE"; // IDLE, INCOMING, IN_CALL
 let sessionId = null;
-let didRingOnce = false; // 재실행 방지 플래그
+let didRingOnce = false;
 let callStartTime = 0;
 let callTimerInterval = null;
 
+// 미리 로드된 첫 번째 턴 데이터
+let firstAudioData = null; 
+
+// 오디오 객체
+const globalAudio = new Audio();
+let isAudioUnlocked = false;
+
+// 녹음 관련
 let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
@@ -23,35 +31,84 @@ const aiWave = document.getElementById("ai-wave");
 const micBtn = document.getElementById("btn-mic");
 const micLabel = document.getElementById("mic-label");
 const timerEl = document.getElementById("call-timer");
+const debugLog = document.getElementById("debug-log");
+
+// --- UTILS ---
+function log(msg) {
+  console.log(msg);
+  if (debugLog) {
+      debugLog.style.display = "block";
+      const p = document.createElement("div");
+      p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      debugLog.prepend(p);
+  }
+}
 
 // --- INITIALIZATION ---
 function init() {
   updateClock();
   setInterval(updateClock, 1000);
-  
-  // 1초 후 자동 수신 시도 (단 한 번만)
-  setTimeout(() => {
-    if (!didRingOnce) {
-      triggerIncomingCall();
-    }
-  }, 1000);
-  
   setupEventListeners();
+  
+  // 페이지 로드 즉시 통화 준비 시작
+  prepareCall();
 }
 
 function setupEventListeners() {
-  // 수신 화면 버튼
   document.getElementById("btn-accept").addEventListener("click", acceptCall);
   document.getElementById("btn-decline").addEventListener("click", declineCall);
-  
-  // 말하기 버튼 (Toggle 방식: 누르면 시작, 다시 누르면 전송)
   micBtn.addEventListener("click", toggleRecording);
-  
-  // 끊기 버튼
   document.getElementById("btn-hangup").addEventListener("click", hangupCall);
+  
+  globalAudio.addEventListener("ended", onAudioEnded);
+  globalAudio.addEventListener("error", (e) => log("오디오 에러: " + e.message));
 }
 
-// --- SCREEN TRANSITIONS ---
+// --- PRE-FETCHING ---
+async function prepareCall() {
+    if (didRingOnce) return;
+
+    try {
+        log("통화 준비 중... (세션 생성 & 첫 멘트 생성)");
+        
+        const formData = new FormData();
+        formData.append("device_info", "web-client");
+        const res1 = await fetch(`${API_BASE}/session/start`, { method: "POST", body: formData });
+        const data1 = await res1.json();
+        sessionId = data1.session_id;
+        
+        const turnData = new FormData();
+        turnData.append("session_id", sessionId);
+        turnData.append("start_ms", 0);
+        turnData.append("end_ms", 0);
+        
+        const res2 = await fetch(`${API_BASE}/turn/assistant`, { method: "POST", body: turnData });
+        const data2 = await res2.json();
+        
+        firstAudioData = {
+            url: data2.audio_url,
+            meta: data2.meta_json
+        };
+        
+        log("준비 완료! 전화 수신 화면 전환");
+        triggerIncomingCall();
+        
+    } catch (e) {
+        log("통화 준비 실패: " + e);
+    }
+}
+
+function unlockAudio() {
+    if (isAudioUnlocked) return;
+    globalAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==';
+    globalAudio.play().then(() => {
+        isAudioUnlocked = true;
+        log("오디오 권한 획득");
+    }).catch(e => {
+        log("오디오 권한 획득 실패: " + e);
+    });
+}
+
 function switchScreen(screenName) {
   [screenIdle, screenIncoming, screenInCall].forEach(el => el.classList.remove("is-active"));
   
@@ -62,55 +119,45 @@ function switchScreen(screenName) {
   currentState = screenName;
 }
 
-// --- CLOCK ---
 function updateClock() {
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
   clockEl.textContent = `${hours}:${minutes}`;
-  
   const options = { month: 'long', day: 'numeric', weekday: 'long' };
   dateEl.textContent = now.toLocaleDateString('ko-KR', options);
 }
-
-// --- CALL LOGIC ---
 
 function triggerIncomingCall() {
   if (currentState !== "IDLE") return;
   didRingOnce = true;
   switchScreen("INCOMING");
-  // 벨소리가 있다면 여기서 play()
 }
 
 function declineCall() {
-  // 거절 시 그냥 IDLE로 복귀 (다시 안 울림)
   switchScreen("IDLE");
 }
 
 async function acceptCall() {
+  unlockAudio(); // 클릭 시점 권한 획득
+
   try {
-    // 세션 시작 요청
-    const formData = new FormData();
-    formData.append("device_info", "web-client");
-    
-    const res = await fetch(`${API_BASE}/session/start`, {
-      method: "POST",
-      body: formData
-    });
-    const data = await res.json();
-    sessionId = data.session_id;
-    
+    if (!sessionId) throw new Error("세션 미준비");
+
     switchScreen("IN_CALL");
     startCallTimer();
     
-    // 마이크 권한 미리 요청
     await navigator.mediaDevices.getUserMedia({ audio: true });
     
-    // AI 먼저 인사 시키기 (옵션)
-    playAssistantTurn(0, 0); 
+    if (firstAudioData && firstAudioData.url) {
+        playAssistantTurn(firstAudioData.url, firstAudioData.meta);
+        firstAudioData = null;
+    } else {
+        requestAssistantTurn();
+    }
     
   } catch (err) {
-    console.error("통화 시작 실패", err);
+    log("통화 연결 에러: " + err);
     alert("통화 연결 실패");
     switchScreen("IDLE");
   }
@@ -133,7 +180,6 @@ function stopCallTimer() {
 
 async function hangupCall() {
   if (sessionId) {
-    // 강제 종료 시에도 finalize 호출
     try {
       await fetch(`${API_BASE}/session/${sessionId}/finalize`, { method: "POST" });
     } catch(e) {}
@@ -143,12 +189,12 @@ async function hangupCall() {
 
 function endSessionUI() {
   stopCallTimer();
+  globalAudio.pause();
+  globalAudio.currentTime = 0;
   sessionId = null;
   switchScreen("IDLE");
   statusText.textContent = "대기 중...";
 }
-
-// --- RECORDING & TURNS ---
 
 async function toggleRecording() {
   if (!isRecording) {
@@ -161,7 +207,7 @@ async function toggleRecording() {
 async function startRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream); // 기본 mimeType (보통 webm)
+    mediaRecorder = new MediaRecorder(stream);
     audioChunks = [];
     
     mediaRecorder.ondataavailable = (event) => {
@@ -171,16 +217,15 @@ async function startRecording() {
     mediaRecorder.start();
     isRecording = true;
     
-    // UI 업데이트
     micBtn.classList.add("recording");
     micLabel.textContent = "전송하기";
-    micBtn.querySelector("svg").style.fill = "white"; // 아이콘 유지
+    micBtn.querySelector("svg").style.fill = "white";
     
     statusText.textContent = "듣고 있어요...";
     aiWave.className = "wave-box listening";
     
   } catch (err) {
-    console.error("Mic error", err);
+    log("마이크 에러: " + err);
     alert("마이크 접근 불가");
   }
 }
@@ -189,14 +234,13 @@ function stopRecordingAndSend() {
   if (!mediaRecorder) return;
   
   mediaRecorder.onstop = async () => {
-    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' }); // 브라우저 호환성 위해 webm
+    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
     await uploadUserTurn(audioBlob);
   };
   
   mediaRecorder.stop();
   isRecording = false;
   
-  // UI 업데이트
   micBtn.classList.remove("recording");
   micLabel.textContent = "말하기";
   
@@ -207,15 +251,10 @@ function stopRecordingAndSend() {
 async function uploadUserTurn(blob) {
   if (!sessionId) return;
   
-  // 1. User Turn Upload
-  const startMs = 0; // 데모용 (실제로는 timestamp 기록 필요)
-  const endMs = 1000;
-  
   const formData = new FormData();
   formData.append("session_id", sessionId);
-  formData.append("start_ms", startMs);
-  formData.append("end_ms", endMs);
-  // 파일명에 확장자 .webm 명시 (백엔드가 인식하도록)
+  formData.append("start_ms", 0);
+  formData.append("end_ms", 1000);
   formData.append("audio", blob, "voice.webm"); 
   
   try {
@@ -224,11 +263,10 @@ async function uploadUserTurn(blob) {
       body: formData
     });
     
-    // 2. Request Assistant Turn
     requestAssistantTurn();
     
   } catch (err) {
-    console.error("Turn upload failed", err);
+    log("업로드 실패: " + err);
     statusText.textContent = "오류 발생";
   }
 }
@@ -249,36 +287,50 @@ async function requestAssistantTurn() {
     playAssistantTurn(data.audio_url, data.meta_json);
     
   } catch (err) {
-    console.error("Assistant error", err);
+    log("AI 응답 에러: " + err);
   }
 }
+
+let currentMeta = null;
 
 function playAssistantTurn(url, meta) {
   statusText.textContent = "말하는 중...";
   aiWave.className = "wave-box speaking";
+  currentMeta = meta;
   
   if (!url) {
-     // 첫 인사 등 url 없을 때
      requestAssistantTurn();
      return;
   }
   
-  const audio = new Audio(API_BASE + url);
-  audio.play();
+  log("재생 시작: " + url);
+  globalAudio.src = API_BASE + url;
   
-  audio.onended = () => {
+  // [수정] 재생 실패 시 '터치하여 듣기' UI 제공
+  globalAudio.play().catch(e => {
+      log("재생 실패(브라우저 차단): " + e);
+      statusText.textContent = "🔊 눌러서 듣기";
+      statusText.style.cursor = "pointer";
+      statusText.onclick = () => {
+          globalAudio.play();
+          statusText.textContent = "말하는 중...";
+          statusText.style.cursor = "default";
+          statusText.onclick = null;
+      };
+  });
+}
+
+function onAudioEnded() {
+    log("재생 완료");
     aiWave.className = "wave-box idle";
     statusText.textContent = "말씀해 주세요.";
     
-    // 종료 플래그 확인
-    if (meta && meta.end_call) {
+    if (currentMeta && currentMeta.end_call) {
       statusText.textContent = "통화가 종료됩니다.";
       setTimeout(async () => {
-        await fetch(`${API_BASE}/session/${sessionId}/finalize`, { method: "POST" });
-        endSessionUI();
+        await hangupCall();
       }, 1500);
     }
-  };
 }
 
 // Start

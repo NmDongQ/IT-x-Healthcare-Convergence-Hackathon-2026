@@ -6,7 +6,8 @@ from openai import OpenAI
 
 client = OpenAI()
 
-TTS_MODEL = "gpt-4o-mini-tts"
+# [중요] 속도가 가장 빠른 tts-1 모델로 변경
+TTS_MODEL = "tts-1"
 TTS_VOICE = "echo"
 
 VOICE_INSTRUCTIONS = """
@@ -27,7 +28,6 @@ def synthesize_speech_to_wav(text: str, out_path: str | Path) -> str:
         voice=TTS_VOICE,
         input=text,
         response_format="wav",
-        instructions=VOICE_INSTRUCTIONS,
     )
 
     out.write_bytes(audio.read())

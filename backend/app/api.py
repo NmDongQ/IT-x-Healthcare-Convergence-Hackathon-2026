@@ -89,7 +89,6 @@ def end_session(session_id: str = Form(...)) -> Dict[str, Any]:
         row = _get_session_or_404(s, session_id)
         row.ended_at_utc = now_utc_iso()
         s.commit()
-        # commit 후에는 객체가 만료되므로 필요한 데이터만 리턴하거나 refresh 해야 함
         return {"session_id": session_id, "ended_at_utc": now_utc_iso()}
 
 @router.post("/session/{session_id}/finalize")
@@ -100,22 +99,15 @@ def finalize_session_endpoint(session_id: str) -> Dict[str, Any]:
     with db() as s:
         row = _get_session_or_404(s, session_id)
         
-        # 아직 종료 시간이 없으면 기록
         if not row.ended_at_utc:
             row.ended_at_utc = now_utc_iso()
         
-        # 1. 전체 대화 로드
         convo = _load_recent_conversation(s, session_id, limit=100)
-        
-        # 2. 리포트 생성 (LLM)
         report_data = generate_final_report(convo)
         
-        # 3. DB에 저장 (JSON 문자열로 변환)
         row.final_report = json.dumps(report_data, ensure_ascii=False)
         s.commit()
         
-        # 4. 응답 데이터 준비 (세션 종료 후 객체 접근 방지를 위해 변수에 담기)
-        # DetachedInstanceError 방지를 위해 값 복사
         response_data = {
             "session_id": row.session_id,
             "ended_at_utc": row.ended_at_utc,
@@ -126,9 +118,6 @@ def finalize_session_endpoint(session_id: str) -> Dict[str, Any]:
 
 @router.get("/session/{session_id}/report")
 def get_session_report(session_id: str) -> Dict[str, Any]:
-    """
-    저장된 리포트 조회 (다른 프론트엔드에서 사용 가능)
-    """
     with db() as s:
         row = _get_session_or_404(s, session_id)
         report = None
@@ -142,6 +131,14 @@ def get_session_report(session_id: str) -> Dict[str, Any]:
             "session_id": row.session_id,
             "report": report
         }
+
+# [NEW] 이 부분이 누락되어 404 에러가 발생했습니다. 다시 추가합니다.
+@router.get("/storage/audio/{filename}")
+def get_audio(filename: str):
+    p = AUDIO_DIR / filename
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(str(p), media_type="audio/wav")
 
 @router.post("/turn/user")
 def user_turn(
@@ -158,7 +155,6 @@ def user_turn(
 
         idx = _next_turn_index(s, session_id)
 
-        # 확장자 처리
         original_ext = Path(audio.filename or "").suffix.lower()
         if not original_ext:
             original_ext = ".webm"
@@ -169,12 +165,10 @@ def user_turn(
         data = audio.file.read()
         out_path.write_bytes(data)
 
-        # STT
         transcript = transcribe_audio(out_path)
         if not transcript:
             transcript = "(전사 실패)"
 
-        # 평가
         context = _load_recent_conversation(s, session_id, limit=10)
         llm_eval = evaluate_transcript(transcript, context=context)
         risk_prob = float(llm_eval.get("risk_probability", 0.0))
@@ -252,8 +246,6 @@ def assistant_turn(
             "meta_json": meta,
         }
 
-# --- EXPORT & MEMBER API ---
-
 @router.get("/session/{session_id}/export/txt")
 def export_txt(session_id: str) -> PlainTextResponse:
     with db() as s:
@@ -294,10 +286,8 @@ def list_members(search: str = "", limit: int = 200, offset: int = 0) -> Dict[st
 @router.post("/members/seed")
 def seed_members() -> Dict[str, Any]:
     name_pool = ["김*준","박*준","이*지","최*연","정*우"]
-    # ... (간소화) ...
     
     with db() as s:
-        # 이미 데이터가 있으면 pass
         if s.execute(select(MemberModel).limit(1)).scalar_one_or_none():
             return {"inserted": 0}
 
